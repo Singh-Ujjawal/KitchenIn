@@ -1,5 +1,6 @@
 package com.example.kitechin.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.*;
 import org.bson.types.ObjectId;
 import org.springframework.data.annotation.Id;
@@ -31,6 +32,8 @@ public class Customer {
     private String email;
 
     @NotBlank(message = "Password is required")
+    @JsonIgnore
+    @ToString.Exclude
     private String password;
 
     @Pattern(regexp = "^[0-9]{10}$", message = "Phone must be 10 digits")

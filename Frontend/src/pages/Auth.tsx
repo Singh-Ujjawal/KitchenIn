@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { FormEvent, useState } from "react";
+import { Navigate, useNavigate } from "react-router-dom";
+import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,221 +8,255 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Header } from "@/components/Header";
-import { StaffCategory, UserRole } from "@/data/mockData";
+import { CATEGORIES, CITIES } from "@/constants";
+import { api } from "@/api";
+import { errorMessage } from "@/lib/errors";
+import { dashboardPath, getToken, getUser, saveSession } from "@/lib/session";
+import type { AuthResponse, UserRole } from "@/types";
 import { toast } from "sonner";
-import { api } from "../api";
 
 const Auth = () => {
   const navigate = useNavigate();
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [userType, setUserType] = useState<UserRole>(UserRole.CUSTOMER);
-  const [showStaffPendingModal, setShowStaffPendingModal] = useState(false);
-
-  // Form states
+  const existing = getToken() && getUser();
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [role, setRole] = useState<UserRole>("CUSTOMER");
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
   const [category, setCategory] = useState("");
+  const [adminCode, setAdminCode] = useState("");
 
-  // Security: Reset to "login" mode whenever the user switches tabs
-  useEffect(() => {
-    setAuthMode("login");
-  }, [userType]);
+  if (existing) return <Navigate to={dashboardPath(getUser()?.role)} replace />;
 
-  // --- 1. REAL LOGIN LOGIC ---
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
+  const switchRole = (next: string) => {
+    setRole(next as UserRole);
+    setMode("login");
+    setPassword("");
+  };
+
+  const login = async (event: FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
     try {
-        let endpoint = "";
-        if (userType === UserRole.CUSTOMER) endpoint = "/customer/login";
-        else if (userType === UserRole.STAFF) endpoint = "/staff/login";
-        else if (userType === UserRole.ADMIN) endpoint = "/admin/login";
+      const path = role === "WORKER" ? "/staff/login" : role === "ADMIN" ? "/admin/login" : "/customer/login";
+      const response = await api.post<AuthResponse>(path, { email, password });
+      saveSession(response.data.token, response.data.user);
+      toast.success(`Welcome back, ${response.data.user.name}`);
+      navigate(dashboardPath(response.data.user.role));
+    } catch (error) {
+      toast.error(errorMessage(error, "Login failed"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
-        console.log(`Attempting login to: ${endpoint}`);
-
-        const response = await api.post(`${endpoint}?email=${email}&password=${password}`);
-
-        if (response.data) {
-            console.log("Login Successful:", response.data);
-            toast.success(`Welcome back, ${response.data.name}!`);
-
-            localStorage.setItem("user", JSON.stringify(response.data));
-            localStorage.setItem("role", userType);
-
-            if (userType === UserRole.ADMIN) navigate("/admin");
-            else if (userType === UserRole.STAFF) navigate("/staff");
-            else navigate("/customer");
+  const register = async (event: FormEvent) => {
+    event.preventDefault();
+    if (role !== "ADMIN" && !/^[0-9]{10}$/.test(phone)) {
+      toast.error("Phone number must be exactly 10 digits");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      if (role === "CUSTOMER") {
+        await api.post("/customer/register", { name, email, password, phone, address });
+        toast.success("Account created. Please sign in.");
+        setMode("login");
+        setPassword("");
+      } else if (role === "ADMIN") {
+        await api.post("/admin/register", { name, email, password, adminCode: adminCode || undefined });
+        toast.success("Admin account created. Please sign in.");
+        setMode("login");
+        setPassword("");
+        setAdminCode("");
+      } else {
+        if (!city || !category) {
+          toast.error("Choose a city and a service category");
+          return;
         }
-    } catch (error: any) {
-        console.error("Login Error:", error);
-        toast.error("Login Failed: " + (error.response?.data?.message || "Invalid credentials"));
+        await api.post("/staff/register", { name, email, password, phone, city, category });
+        setPendingOpen(true);
+        setPassword("");
+      }
+    } catch (error) {
+      toast.error(errorMessage(error, "Registration failed"));
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  // --- 2. REAL REGISTRATION LOGIC (Customer & Staff Only) ---
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    try {
-        if (userType === UserRole.CUSTOMER) {
-            const payload = { name, email, password, phone, address };
-            await api.post("/customer/register", payload);
-            toast.success("Customer Registration successful! Please login.");
-            setAuthMode("login");
-
-        } else if (userType === UserRole.STAFF) {
-            const payload = { name, email, password, phone, city, category };
-            await api.post("/staff/register", payload);
-            setShowStaffPendingModal(true);
-        } 
-        // Admin registration logic is intentionally hidden from UI
-
-    } catch (error: any) {
-        console.error("Registration Error:", error);
-        toast.error("Registration Failed: " + (error.response?.data?.message || "Something went wrong"));
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-background">
-      <Header />
-
-      <div className="container mx-auto px-4 py-12">
-        <Card className="max-w-2xl mx-auto shadow-xl">
-          <CardHeader>
-            <CardTitle className="text-3xl text-center">
-              {authMode === "login" ? "Welcome Back" : "Create Account"}
-            </CardTitle>
-            <CardDescription className="text-center">
-              {userType === UserRole.ADMIN 
-                ? "Administrator Access Portal"
-                : (authMode === "login" ? "Sign in to access your dashboard" : "Register to get started")}
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent>
-            <Tabs value={userType} onValueChange={(v) => setUserType(v as UserRole)}>
-              <TabsList className="grid w-full grid-cols-3 mb-6">
-                <TabsTrigger value={UserRole.CUSTOMER}>Customer</TabsTrigger>
-                <TabsTrigger value={UserRole.STAFF}>Staff</TabsTrigger>
-                <TabsTrigger value={UserRole.ADMIN}>Admin</TabsTrigger>
-              </TabsList>
-
-              {/* --- CUSTOMER FORM --- */}
-              <TabsContent value={UserRole.CUSTOMER}>
-                <form onSubmit={authMode === "login" ? handleLogin : handleRegister} className="space-y-4">
-                  {authMode === "register" && (
-                    <>
-                      <div><Label>Full Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} required /></div>
-                      <div><Label>Phone Number</Label><Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required /></div>
-                      <div><Label>Address</Label><Input value={address} onChange={(e) => setAddress(e.target.value)} required /></div>
-                    </>
-                  )}
-                  <div><Label>Email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
-                  <div><Label>Password</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
-                  <Button type="submit" className="w-full bg-primary text-primary-foreground">
-                    {authMode === "login" ? "Sign In" : "Register"}
-                  </Button>
-                </form>
-              </TabsContent>
-
-              {/* --- STAFF FORM --- */}
-              <TabsContent value={UserRole.STAFF}>
-                <form onSubmit={authMode === "login" ? handleLogin : handleRegister} className="space-y-4">
-                  {authMode === "register" && (
-                    <>
-                      <div><Label>Full Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} required /></div>
-                      <div><Label>Phone Number</Label><Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required /></div>
-                      <div><Label>City</Label>
-                        <Select value={city} onValueChange={setCity} required>
-                          <SelectTrigger><SelectValue placeholder="Select city" /></SelectTrigger>
-                          <SelectContent className="bg-popover">
-                            <SelectItem value="Lucknow">Lucknow</SelectItem>
-                            <SelectItem value="Patna">Patna</SelectItem>
-                            <SelectItem value="Kanpur">Kanpur</SelectItem>
-                            <SelectItem value="Delhi">Delhi</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div><Label>Category</Label>
-                        <Select value={category} onValueChange={setCategory} required>
-                          <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
-                          <SelectContent className="bg-popover">
-                            <SelectItem value={StaffCategory.MAID}>Maid</SelectItem>
-                            <SelectItem value={StaffCategory.MECHANIC}>Mechanic</SelectItem>
-                            <SelectItem value={StaffCategory.WORKER}>Worker</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </>
-                  )}
-                  <div><Label>Email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
-                  <div><Label>Password</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
-                  <Button type="submit" className="w-full bg-primary text-primary-foreground">
-                    {authMode === "login" ? "Sign In" : "Register"}
-                  </Button>
-                </form>
-              </TabsContent>
-
-              {/* --- ADMIN FORM (LOGIN ONLY - NO REGISTER) --- */}
-              <TabsContent value={UserRole.ADMIN}>
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div className="bg-blue-50 p-3 rounded-md text-sm text-blue-800 border border-blue-200 mb-4">
-                    Note: Admin registration is restricted. Please log in with your credentials.
-                  </div>
-                  <div>
-                    <Label>Admin Email</Label>
-                    <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-                  </div>
-                  <div>
-                    <Label>Password</Label>
-                    <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-                  </div>
-                  <Button type="submit" className="w-full bg-primary text-primary-foreground">
-                    Admin Sign In
-                  </Button>
-                </form>
-              </TabsContent>
-            </Tabs>
-
-            {/* Only show Register toggle for Customer and Staff */}
-            {userType !== UserRole.ADMIN && (
-              <div className="mt-6 text-center">
-                <button
-                  type="button"
-                  onClick={() => setAuthMode(authMode === "login" ? "register" : "login")}
-                  className="text-primary hover:underline text-sm"
-                >
-                  {authMode === "login" 
-                    ? "Don't have an account? Register" 
-                    : "Already have an account? Sign In"}
-                </button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+  const passwordField = (
+    <div className="space-y-2">
+      <Label htmlFor="password">Password</Label>
+      <div className="relative">
+        <Input
+          id="password"
+          type={showPassword ? "text" : "password"}
+          autoComplete={mode === "login" ? "current-password" : "new-password"}
+          value={password}
+          minLength={mode === "register" ? 6 : undefined}
+          onChange={(event) => setPassword(event.target.value)}
+          required
+        />
+        <button
+          type="button"
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+          onClick={() => setShowPassword((value) => !value)}
+          aria-label={showPassword ? "Hide password" : "Show password"}
+        >
+          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
       </div>
-
-      {/* Staff Pending Modal */}
-      <Dialog open={showStaffPendingModal} onOpenChange={setShowStaffPendingModal}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="text-success">Registration Successful!</DialogTitle>
-            <DialogDescription className="pt-4 space-y-3">
-              <p className="font-semibold text-foreground">Your account is <span className="text-warning">PENDING</span> Admin approval.</p>
-              <p className="text-muted-foreground">You cannot login until verified (24-48 hrs).</p>
-            </DialogDescription>
-          </DialogHeader>
-          <Button onClick={() => { setShowStaffPendingModal(false); navigate("/"); }}>OK, Got it</Button>
-        </DialogContent>
-      </Dialog>
     </div>
   );
+
+  return (
+    <main className="hero-glow flex min-h-[calc(100vh-4rem)] items-center px-4 py-12">
+      <Card className="fade-up mx-auto w-full max-w-xl rounded-3xl border-border/70 shadow-lg">
+        <CardHeader className="space-y-2 pb-4 text-center">
+          <CardTitle className="font-display text-3xl">{mode === "login" ? "Sign in" : "Create an account"}</CardTitle>
+          <CardDescription>
+            {role === "ADMIN" ? "Administrator access" : "Choose your role, then sign in or create an account."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs value={role} onValueChange={switchRole}>
+            <TabsList className="mb-6 grid h-11 w-full grid-cols-3 rounded-xl bg-muted p-1">
+              <TabsTrigger value="CUSTOMER" className="rounded-lg">Customer</TabsTrigger>
+              <TabsTrigger value="WORKER" className="rounded-lg">Worker</TabsTrigger>
+              <TabsTrigger value="ADMIN" className="rounded-lg">Admin</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="CUSTOMER">
+              <form onSubmit={mode === "login" ? login : register} className="space-y-4">
+                {mode === "register" && (
+                  <>
+                    <Field label="Full name" value={name} onChange={setName} />
+                    <Field label="Phone" value={phone} onChange={setPhone} inputMode="numeric" />
+                    <Field label="Address" value={address} onChange={setAddress} />
+                  </>
+                )}
+                <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
+                {passwordField}
+                <Button size="lg" className="w-full rounded-xl shadow-md" disabled={submitting}>{submitting ? "Please wait..." : mode === "login" ? "Sign in" : "Create account"}</Button>
+              </form>
+            </TabsContent>
+
+            <TabsContent value="WORKER">
+              <form onSubmit={mode === "login" ? login : register} className="space-y-4">
+                {mode === "register" && (
+                  <>
+                    <Field label="Full name" value={name} onChange={setName} />
+                    <Field label="Phone" value={phone} onChange={setPhone} inputMode="numeric" />
+                    <div className="space-y-2">
+                      <Label>City</Label>
+                      <Select value={city || undefined} onValueChange={setCity}>
+                        <SelectTrigger><SelectValue placeholder="Select city" /></SelectTrigger>
+                        <SelectContent>
+                          {CITIES.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Category</Label>
+                      <Select value={category || undefined} onValueChange={setCategory}>
+                        <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+                        <SelectContent>
+                          {CATEGORIES.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
+                )}
+                <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
+                {passwordField}
+                <Button size="lg" className="w-full rounded-xl shadow-md" disabled={submitting}>{submitting ? "Please wait..." : mode === "login" ? "Sign in" : "Submit application"}</Button>
+              </form>
+            </TabsContent>
+
+            <TabsContent value="ADMIN">
+              <form onSubmit={mode === "login" ? login : register} className="space-y-4">
+                {mode === "register" && (
+                  <>
+                    <p className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                      The first admin account needs no code. After that, an admin invite code is required.
+                    </p>
+                    <Field label="Full name" value={name} onChange={setName} />
+                  </>
+                )}
+                <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="username" />
+                {passwordField}
+                {mode === "register" && (
+                  <Field label="Admin invite code" type="password" value={adminCode} onChange={setAdminCode} required={false} />
+                )}
+                <Button size="lg" className="w-full rounded-xl shadow-md" disabled={submitting}>{submitting ? "Please wait..." : mode === "login" ? "Admin sign in" : "Create admin account"}</Button>
+              </form>
+            </TabsContent>
+          </Tabs>
+
+          <button
+            type="button"
+            className="mt-6 w-full text-center text-sm text-primary hover:underline"
+            onClick={() => setMode(mode === "login" ? "register" : "login")}
+          >
+            {mode === "login" ? "Need an account? Register" : "Already registered? Sign in"}
+          </button>
+        </CardContent>
+      </Card>
+
+      <Dialog open={pendingOpen} onOpenChange={setPendingOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Application received</DialogTitle>
+            <DialogDescription>
+              Your worker account stays pending until an administrator approves it. You can sign in after approval.
+            </DialogDescription>
+          </DialogHeader>
+          <Button onClick={() => { setPendingOpen(false); navigate("/"); }}>Back to home</Button>
+        </DialogContent>
+      </Dialog>
+    </main>
+  );
 };
+
+function Field({
+  label,
+  value,
+  onChange,
+  type = "text",
+  autoComplete,
+  inputMode,
+  required = true,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  autoComplete?: string;
+  inputMode?: "numeric" | "text";
+  required?: boolean;
+}) {
+  const id = label.toLowerCase().replace(/\s+/g, "-");
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type={type}
+        inputMode={inputMode}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+      />
+    </div>
+  );
+}
 
 export default Auth;

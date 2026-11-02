@@ -1,136 +1,118 @@
 import { useEffect, useState } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
-import { Header } from "@/components/Header";
-import { Card, CardContent, CardFooter } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Star, MapPin, Phone } from "lucide-react";
-import { api } from "../api"; // Real API connection
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { MapPin, Star } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { api, profileImageUrl } from "@/api";
+import { categoryLabel } from "@/constants";
+import { errorMessage } from "@/lib/errors";
+import { getUser } from "@/lib/session";
+import { EmptyState } from "@/components/EmptyState";
+import { Pager } from "@/components/Pager";
+import { ReviewsDialog } from "@/components/ReviewsDialog";
+import type { StaffPublic } from "@/types";
 
-// Define what a Staff member looks like
-interface Staff {
-  id: string;
-  name: string;
-  category: string;
-  city: string;
-  rating: number;
-  reviewCount: number;
-  profilePicture?: string;
-  price?: number; // Optional if you added this
-}
+const PAGE_SIZE = 6;
 
 const SearchResults = () => {
-  const [searchParams] = useSearchParams();
+  const [params] = useSearchParams();
   const navigate = useNavigate();
-  
-  const city = searchParams.get("city");
-  const category = searchParams.get("category");
-
-  const [staffList, setStaffList] = useState<Staff[]>([]);
+  const city = params.get("city") || "";
+  const category = params.get("category") || "";
+  const [staff, setStaff] = useState<StaffPublic[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const [reviewStaff, setReviewStaff] = useState<StaffPublic | null>(null);
 
   useEffect(() => {
-    const fetchStaff = async () => {
+    const load = async () => {
       if (!city || !category) {
         setLoading(false);
+        setError("Choose a city and a service on the home page.");
         return;
       }
-
+      setLoading(true);
+      setError("");
       try {
-        console.log(`Searching for ${category} in ${city}...`);
-        
-        // CALL REAL BACKEND API
-        const response = await api.get(`/staff/search/${city}/${category}`);
-        
-        console.log("Found Staff:", response.data);
-        setStaffList(response.data);
-      } catch (error) {
-        console.error("Search failed:", error);
-        toast.error("Failed to load staff results");
+        const response = await api.get<StaffPublic[]>(`/staff/search/${encodeURIComponent(city)}/${encodeURIComponent(category)}`);
+        setStaff(response.data);
+        setPage(1);
+      } catch (err) {
+        setError(errorMessage(err, "Search failed"));
       } finally {
         setLoading(false);
       }
     };
-
-    fetchStaff();
+    load();
   }, [city, category]);
 
-  // Handle "Book Now" click
-  const handleBookNow = (staffId: string) => {
-    // Check if user is logged in
-    const user = localStorage.getItem("user");
+  const book = () => {
+    const user = getUser();
     if (!user) {
-        toast.error("Please login to book a service");
-        navigate("/auth");
-        return;
+      toast.error("Sign in as a customer to request this service");
+      navigate("/auth");
+      return;
     }
-    // Navigate to dashboard or booking flow (Simple redirect for now)
-    navigate("/customer");
-    toast.info("Please create a booking request from your dashboard.");
+    if (user.role !== "CUSTOMER") {
+      toast.error("Only customer accounts can request a booking");
+      return;
+    }
+    navigate(`/customer?city=${encodeURIComponent(city)}&category=${encodeURIComponent(category)}`);
+    toast.info("Your request is sent to an admin, who assigns an approved professional in this city.");
   };
 
+  const pages = Math.max(1, Math.ceil(staff.length / PAGE_SIZE));
+  const visible = staff.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   return (
-    <div className="min-h-screen bg-background pb-10">
-      <Header />
-
-      <main className="container mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-2">Search Results</h1>
-        <p className="text-muted-foreground mb-8">
-          Showing results for <span className="font-semibold text-primary">{category}</span> in <span className="font-semibold text-primary">{city}</span>
+    <main className="container mx-auto space-y-6 px-4 py-8">
+      <div>
+        <h1 className="text-3xl font-semibold">Available professionals</h1>
+        <p className="mt-1 text-muted-foreground">
+          {categoryLabel(category)} in {city || "your city"}. Booking does not pick a person directly. An admin assigns someone approved for this city and service.
         </p>
-
-        {loading ? (
-          <div className="text-center py-20">Loading professionals...</div>
-        ) : staffList.length === 0 ? (
-          <div className="text-center py-20 border rounded-lg bg-gray-50">
-            <h2 className="text-xl font-semibold text-gray-600">No staff found matching your criteria.</h2>
-            <p className="text-gray-500 mt-2">Try searching for a different city or category.</p>
-            <Button className="mt-4" onClick={() => navigate("/")}>Back to Home</Button>
-          </div>
-        ) : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {staffList.map((staff) => (
-              <Card key={staff.id} className="overflow-hidden hover:shadow-lg transition-shadow">
-                <div className="h-48 bg-gray-200 relative">
-                  {/* Use real profile pic or a placeholder */}
-                  <img 
-                    src={staff.profilePicture ? `http://localhost:8080/staff/docs/image/${staff.profilePicture}` : "https://images.unsplash.com/photo-1581092795360-fd1ca04f0952"} 
-                    alt={staff.name}
-                    className="w-full h-full object-cover"
-                  />
-                  <Badge className="absolute top-4 right-4 bg-white text-black hover:bg-white">
-                    {staff.category}
-                  </Badge>
+      </div>
+      {loading && <p className="text-sm text-muted-foreground">Searching...</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {!loading && !error && staff.length === 0 && (
+        <EmptyState title="No professionals found" description="Try another city or service. Only approved staff are listed." />
+      )}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {visible.map((person) => {
+          const photo = profileImageUrl(person.profilePicture);
+          return (
+            <Card key={person.id}>
+              {photo && <img src={photo} alt="" className="h-44 w-full object-cover" />}
+              <CardContent className="space-y-3 p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <h2 className="text-lg font-semibold">{person.name}</h2>
+                  <p className="flex items-center gap-1 text-sm">
+                    <Star className="h-4 w-4 fill-amber-500 text-amber-500" />
+                    {person.rating || "New"} ({person.reviewCount || 0})
+                  </p>
                 </div>
-                
-                <CardContent className="p-6">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="text-xl font-bold">{staff.name}</h3>
-                    <div className="flex items-center gap-1 text-amber-500 font-medium">
-                      <Star className="w-4 h-4 fill-current" />
-                      <span>{staff.rating || "New"}</span>
-                      <span className="text-gray-400 text-sm font-normal">({staff.reviewCount})</span>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-2 text-gray-600 mb-4">
-                    <MapPin className="w-4 h-4" />
-                    <span>{staff.city}</span>
-                  </div>
-                </CardContent>
-
-                <CardFooter className="p-6 pt-0">
-                  <Button className="w-full" onClick={() => handleBookNow(staff.id)}>
-                    Book Now
-                  </Button>
-                </CardFooter>
-              </Card>
-            ))}
-          </div>
-        )}
-      </main>
-    </div>
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <MapPin className="h-4 w-4" /> {person.city} · {categoryLabel(person.category)}
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="outline" className="flex-1" onClick={() => setReviewStaff(person)}>Reviews</Button>
+                  <Button className="flex-1" onClick={book}>Request booking</Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+      <Pager page={page} pages={pages} onPage={setPage} />
+      <ReviewsDialog
+        open={Boolean(reviewStaff)}
+        staffId={reviewStaff?.id || null}
+        staffName={reviewStaff?.name}
+        onOpenChange={(open) => !open && setReviewStaff(null)}
+      />
+    </main>
   );
 };
 

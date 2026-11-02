@@ -1,310 +1,260 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Calendar, Clock, MapPin, Phone, Star } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Header } from "@/components/Header";
-import { Calendar, Clock, MapPin, FileText, XCircle } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
-import { api } from "../api";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { api, profileImageUrl } from "@/api";
+import { CATEGORIES, CITIES, TIME_SLOTS, categoryLabel } from "@/constants";
+import { errorMessage } from "@/lib/errors";
+import { formatDate, formatMoney, todayInputValue } from "@/lib/format";
+import { getUser } from "@/lib/session";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { EmptyState } from "@/components/EmptyState";
+import { Pager } from "@/components/Pager";
+import { StarRating } from "@/components/StarRating";
+import { StatusBadge } from "@/components/StatusBadge";
+import type { Booking } from "@/types";
 
-interface Booking {
-  id: string;
-  serviceCategory: string;
-  category?: string;
-  bookingDate: string;
-  timeSlot: string;
-  serviceAddress: string;
-  problemDescription: string;
-  status: "PENDING" | "ASSIGNED" | "COMPLETED" | "CANCELLED";
-  price?: number;
-  staffId?: string;
-}
+const PAGE_SIZE = 5;
 
 const CustomerDashboard = () => {
-  const navigate = useNavigate();
-  const [user, setUser] = useState<any>(null);
+  const user = getUser();
+  const [params] = useSearchParams();
   const [bookings, setBookings] = useState<Booking[]>([]);
-  const [loading, setLoading] = useState(true); // Start loading as true
-
-  // Form States
-  const [city, setCity] = useState("");
-  const [serviceCategory, setServiceCategory] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [page, setPage] = useState(1);
+  const [city, setCity] = useState(params.get("city") || "");
+  const [category, setCategory] = useState(params.get("category") || "");
   const [date, setDate] = useState("");
   const [timeSlot, setTimeSlot] = useState("");
-  const [address, setAddress] = useState("");
+  const [address, setAddress] = useState(user?.address || "");
   const [description, setDescription] = useState("");
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [reviewBooking, setReviewBooking] = useState<Booking | null>(null);
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState("");
+
+  const load = async () => {
+    if (!user) return;
+    const response = await api.get<Booking[]>(`/bookings/history/${user.id}`);
+    setBookings(response.data);
+  };
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const storedUser = localStorage.getItem("user");
-        
-        if (!storedUser) {
-          console.warn("No user found in localStorage, redirecting to auth");
-          navigate("/auth");
-          return;
-        }
-
-        const parsedUser = JSON.parse(storedUser);
-        
-        // Validate user object structure
-        if (!parsedUser || !parsedUser.id) {
-             console.error("Invalid user data structure:", parsedUser);
-             toast.error("Session invalid. Please login again.");
-             localStorage.removeItem("user"); // Clear bad data
-             navigate("/auth");
-             return;
-        }
-
-        setUser(parsedUser);
-
-        // Fetch Bookings using the ID from localStorage
-        console.log(`Fetching bookings for customer ID: ${parsedUser.id}`);
-        const response = await api.get(`/bookings/history/${parsedUser.id}`);
-        console.log("Bookings loaded:", response.data);
-        setBookings(response.data);
-
-      } catch (error) {
-        console.error("Dashboard Load Error:", error);
-        toast.error("Failed to load dashboard data.");
-      } finally {
-        setLoading(false); // Stop loading whether success or fail
-      }
-    };
-
-    loadData();
-  }, [navigate]);
-
-  const handleBookService = async () => {
-    if (!date || !timeSlot || !address || !description || !serviceCategory || !city) {
-      toast.error("Please fill in all fields, including City and Category.");
+    const current = getUser();
+    if (!current) {
+      setLoading(false);
       return;
     }
+    api.get<Booking[]>(`/bookings/history/${current.id}`)
+      .then((response) => setBookings(response.data))
+      .catch((error) => toast.error(errorMessage(error, "Could not load your bookings")))
+      .finally(() => setLoading(false));
+  }, []);
 
-    if (!user || !user.id) {
-        toast.error("User session not found. Please login again.");
-        return;
+  const pages = Math.max(1, Math.ceil(bookings.length / PAGE_SIZE));
+  const visible = useMemo(
+    () => bookings.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [bookings, page]
+  );
+
+  const book = async () => {
+    if (!city || !category || !date || !timeSlot || !address.trim() || !description.trim()) {
+      toast.error("Fill in city, service, date, time, address, and the problem");
+      return;
     }
-
+    setSubmitting(true);
     try {
-      const payload = {
-        customerId: user.id,
-        category: serviceCategory,
+      await api.post("/bookings/book", {
+        category,
+        city,
         bookingDate: date,
-        timeSlot: timeSlot,
-        serviceAddress: `${address}, ${city}`, // Combine address and city
-        problemDescription: description,
-        status: "PENDING"
-      };
-
-      console.log("Sending Booking Payload:", payload);
-      await api.post("/bookings/book", payload);
-      
-      toast.success("Booking Request Sent Successfully!");
-      
-      // Refresh bookings list
-      const response = await api.get(`/bookings/history/${user.id}`);
-      setBookings(response.data);
-
-      // Reset crucial form fields
+        timeSlot,
+        serviceAddress: address.trim(),
+        problemDescription: description.trim(),
+      });
+      toast.success("Booking request sent. An admin will assign a professional.");
       setDescription("");
       setDate("");
-      setAddress("");
-    } catch (error: any) {
-      console.error("Booking Failed:", error);
-      toast.error("Booking Failed: " + (error.response?.data?.message || "Server Error"));
-    }
-  };
-
-  const handleCancelBooking = async (bookingId: string) => {
-    if(!confirm("Are you sure you want to cancel?")) return;
-
-    try {
-      await api.post(`/bookings/cancel/${bookingId}`);
-      toast.success("Booking Cancelled");
-      
-      // Refresh list
-      if (user?.id) {
-          const response = await api.get(`/bookings/history/${user.id}`);
-          setBookings(response.data);
-      }
+      await load();
+      setPage(1);
     } catch (error) {
-      console.error("Cancel failed", error);
-      toast.error("Failed to cancel booking");
+      toast.error(errorMessage(error, "Booking failed"));
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "COMPLETED": return "bg-green-500 hover:bg-green-600";
-      case "ASSIGNED": return "bg-blue-500 hover:bg-blue-600";
-      case "CANCELLED": return "bg-red-500 hover:bg-red-600";
-      default: return "bg-yellow-500 hover:bg-yellow-600"; // PENDING
+  const cancel = async () => {
+    if (!cancelId) return;
+    setSubmitting(true);
+    try {
+      await api.post(`/bookings/cancel/${cancelId}`);
+      toast.success("Booking cancelled");
+      setCancelId(null);
+      await load();
+    } catch (error) {
+      toast.error(errorMessage(error, "Could not cancel the booking"));
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  // --- RENDER LOADING STATE ---
-  // This prevents the "White Screen" crash by showing a spinner until data is ready
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-        <p className="mt-4 text-gray-600">Loading your dashboard...</p>
-      </div>
-    );
-  }
+  const submitReview = async () => {
+    if (!reviewBooking) return;
+    setSubmitting(true);
+    try {
+      await api.post("/reviews/add", { bookingId: reviewBooking.id, rating, comment: comment.trim() });
+      toast.success("Review saved");
+      setReviewBooking(null);
+      setComment("");
+      setRating(5);
+      await load();
+    } catch (error) {
+      toast.error(errorMessage(error, "Could not save the review"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-background pb-10">
-      <Header userName={user?.name} userRole="customer" />
+    <main className="container mx-auto space-y-8 px-4 py-8">
+      <div>
+        <h1 className="text-3xl font-semibold">Hello, {user?.name}</h1>
+        <p className="mt-1 text-muted-foreground">Request a visit. An admin assigns an approved professional in your city.</p>
+      </div>
 
-      <main className="container mx-auto px-4 py-8 space-y-8">
-        
-        {/* --- SECTION 1: BOOK A SERVICE --- */}
-        <Card className="shadow-md">
-          <CardHeader>
-            <CardTitle className="text-2xl text-primary">Book a Service</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-6 md:grid-cols-2">
-            
-            <div className="space-y-2">
-              <Label>City</Label>
-              <Select onValueChange={setCity}>
-                <SelectTrigger><SelectValue placeholder="Select City" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Lucknow">Lucknow</SelectItem>
-                  <SelectItem value="Patna">Patna</SelectItem>
-                  <SelectItem value="Delhi">Delhi</SelectItem>
-                  <SelectItem value="Kanpur">Kanpur</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Book a service</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label>City</Label>
+            <Select value={city || undefined} onValueChange={setCity}>
+              <SelectTrigger><SelectValue placeholder="Select city" /></SelectTrigger>
+              <SelectContent>{CITIES.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Service</Label>
+            <Select value={category || undefined} onValueChange={setCategory}>
+              <SelectTrigger><SelectValue placeholder="Select service" /></SelectTrigger>
+              <SelectContent>{CATEGORIES.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="date">Date</Label>
+            <Input id="date" type="date" min={todayInputValue()} value={date} onChange={(event) => setDate(event.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>Time</Label>
+            <Select value={timeSlot || undefined} onValueChange={setTimeSlot}>
+              <SelectTrigger><SelectValue placeholder="Select time" /></SelectTrigger>
+              <SelectContent>{TIME_SLOTS.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="address">Address</Label>
+            <Input id="address" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="House, street, area" />
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="problem">What needs to be done?</Label>
+            <Textarea id="problem" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Describe the job" />
+          </div>
+          <Button className="md:col-span-2" disabled={submitting} onClick={book}>
+            {submitting ? "Please wait..." : "Submit booking request"}
+          </Button>
+        </CardContent>
+      </Card>
 
-            <div className="space-y-2">
-              <Label>Service Category</Label>
-              <Select onValueChange={setServiceCategory}>
-                <SelectTrigger><SelectValue placeholder="Select Service" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="MAID">Maid Service</SelectItem>
-                  <SelectItem value="MECHANIC">Mechanic / Repair</SelectItem>
-                  <SelectItem value="WORKER">General Worker</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Date</Label>
-              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Time Slot</Label>
-              <Select onValueChange={setTimeSlot}>
-                <SelectTrigger><SelectValue placeholder="Select Time" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Morning (9AM - 12PM)">Morning (9AM - 12PM)</SelectItem>
-                  <SelectItem value="Afternoon (12PM - 4PM)">Afternoon (12PM - 4PM)</SelectItem>
-                  <SelectItem value="Evening (4PM - 8PM)">Evening (4PM - 8PM)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2 md:col-span-2">
-              <Label>Address</Label>
-              <Input placeholder="Enter your full address (House No, Street, Area)" value={address} onChange={(e) => setAddress(e.target.value)} />
-            </div>
-
-            <div className="space-y-2 md:col-span-2">
-              <Label>Problem Description</Label>
-              <Textarea placeholder="Describe the issue in detail..." value={description} onChange={(e) => setDescription(e.target.value)} />
-            </div>
-
-            <Button className="md:col-span-2 w-full text-lg" onClick={handleBookService}>
-              Submit Booking Request
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* --- SECTION 2: MY BOOKINGS HISTORY --- */}
-        <div>
-          <h2 className="text-2xl font-bold mb-4 text-gray-800">My Bookings</h2>
-          
-          {bookings.length === 0 ? (
-            <div className="text-center p-12 border-2 border-dashed rounded-lg bg-gray-50 text-gray-500">
-              <FileText className="h-12 w-12 mx-auto mb-2 text-gray-300" />
-              <p className="text-lg">No bookings found.</p>
-              <p className="text-sm">Book a service above to get started!</p>
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {bookings.map((booking) => (
-                <Card key={booking.id} className="border shadow-sm hover:shadow-md transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <h3 className="font-bold text-lg text-primary">
-                          {booking.serviceCategory || booking.category} Service
-                        </h3>
-                        <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                          ID: {booking.id}
-                        </p>
-                      </div>
-                      <Badge className={`${getStatusColor(booking.status)} text-white`}>
-                        {booking.status}
-                      </Badge>
-                    </div>
-
-                    <div className="grid md:grid-cols-2 gap-y-2 gap-x-4 text-sm text-gray-700 bg-gray-50 p-4 rounded-md">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-gray-400" />
-                        <span className="font-medium">Date:</span> {booking.bookingDate}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-gray-400" />
-                        <span className="font-medium">Time:</span> {booking.timeSlot}
-                      </div>
-                      <div className="flex items-center gap-2 md:col-span-2">
-                        <MapPin className="w-4 h-4 text-gray-400" />
-                        <span className="font-medium">Address:</span> {booking.serviceAddress}
-                      </div>
-                      <div className="flex items-start gap-2 md:col-span-2 mt-2 pt-2 border-t border-gray-200">
-                        <FileText className="w-4 h-4 text-gray-400 mt-0.5" />
-                        <span className="italic text-gray-600">"{booking.problemDescription}"</span>
-                      </div>
-                    </div>
-
-                    {/* Actions Footer */}
-                    {(booking.status === "PENDING" || booking.status === "ASSIGNED") && (
-                      <div className="mt-4 pt-4 flex justify-end">
-                        <Button 
-                          variant="destructive" 
-                          size="sm"
-                          onClick={() => handleCancelBooking(booking.id)}
-                          className="flex items-center gap-1"
-                        >
-                          <XCircle className="w-4 h-4" /> Cancel Booking
-                        </Button>
-                      </div>
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold">Your bookings</h2>
+        {loading && <p className="text-sm text-muted-foreground">Loading bookings...</p>}
+        {!loading && bookings.length === 0 && (
+          <EmptyState title="No bookings yet" description="Book your first home service using the form above." />
+        )}
+        {visible.map((booking) => {
+          const photo = profileImageUrl(booking.staffProfilePicture);
+          return (
+            <Card key={booking.id}>
+              <CardContent className="space-y-4 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold">{categoryLabel(booking.category)}</h3>
+                    <p className="text-sm text-muted-foreground">{booking.city}</p>
+                  </div>
+                  <StatusBadge status={booking.status} />
+                </div>
+                <div className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
+                  <p className="flex items-center gap-2"><Calendar className="h-4 w-4" /> {formatDate(booking.bookingDate)}</p>
+                  <p className="flex items-center gap-2"><Clock className="h-4 w-4" /> {booking.timeSlot}</p>
+                  <p className="flex items-center gap-2 md:col-span-2"><MapPin className="h-4 w-4" /> {booking.serviceAddress}</p>
+                </div>
+                <p className="text-sm">{booking.problemDescription}</p>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+                  <div className="text-sm">
+                    <p className="font-medium">{booking.staffName || "Waiting for assignment"}</p>
+                    {booking.staffName && (
+                      <p className="mt-1 flex items-center gap-3 text-muted-foreground">
+                        {photo && <img src={photo} alt="" className="h-8 w-8 rounded-md object-cover" />}
+                        <span className="flex items-center gap-1"><Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" /> {booking.staffRating || "New"}</span>
+                        {booking.staffPhone && <span className="flex items-center gap-1"><Phone className="h-3.5 w-3.5" /> {booking.staffPhone}</span>}
+                      </p>
                     )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </div>
-      </main>
-    </div>
+                    <p className="mt-1">Price: {formatMoney(booking.price)}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    {(booking.status === "PENDING" || booking.status === "ASSIGNED") && (
+                      <Button variant="destructive" size="sm" onClick={() => setCancelId(booking.id)}>Cancel</Button>
+                    )}
+                    {booking.status === "COMPLETED" && !booking.reviewed && (
+                      <Button size="sm" onClick={() => { setReviewBooking(booking); setRating(5); setComment(""); }}>Leave review</Button>
+                    )}
+                    {booking.reviewed && <span className="text-sm text-muted-foreground">Reviewed</span>}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+        <Pager page={page} pages={pages} onPage={setPage} />
+      </section>
+
+      <ConfirmDialog
+        open={Boolean(cancelId)}
+        title="Cancel this booking?"
+        description="Pending and assigned bookings can be cancelled. A completed booking cannot."
+        confirmLabel="Cancel booking"
+        destructive
+        loading={submitting}
+        onOpenChange={(open) => !open && setCancelId(null)}
+        onConfirm={cancel}
+      />
+
+      <Dialog open={Boolean(reviewBooking)} onOpenChange={(open) => !open && setReviewBooking(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Review {reviewBooking?.staffName || "this visit"}</DialogTitle>
+            <DialogDescription>One review is saved for each completed booking.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <StarRating value={rating} onChange={setRating} />
+            <Textarea value={comment} maxLength={500} onChange={(event) => setComment(event.target.value)} placeholder="Optional comment" />
+            <Button className="w-full" disabled={submitting} onClick={submitReview}>
+              {submitting ? "Please wait..." : "Submit review"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </main>
   );
 };
 

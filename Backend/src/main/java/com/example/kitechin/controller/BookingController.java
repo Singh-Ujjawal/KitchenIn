@@ -1,69 +1,75 @@
 package com.example.kitechin.controller;
 
-import com.example.kitechin.entity.Booking;
+import com.example.kitechin.dto.AssignBookingRequest;
+import com.example.kitechin.dto.BookingRequest;
+import com.example.kitechin.dto.BookingResponse;
+import com.example.kitechin.security.CurrentUser;
 import com.example.kitechin.service.BookingService;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/bookings")
-@RequiredArgsConstructor
-@Tag(name="Booking APIs")
+@Tag(name = "Booking APIs")
 public class BookingController {
 
     private final BookingService bookingService;
 
-    // --- Customer Endpoints ---
+    public BookingController(BookingService bookingService) {
+        this.bookingService = bookingService;
+    }
 
-    // 1. Create a new booking
     @PostMapping("/book")
-    public Booking createBooking(@RequestBody Booking booking) {
-        return bookingService.createBooking(booking);
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('CUSTOMER')")
+    public BookingResponse createBooking(@Valid @RequestBody BookingRequest request) {
+        return bookingService.createBooking(request, CurrentUser.require());
     }
 
-    // 2. View booking history for a specific customer
     @GetMapping("/history/{customerId}")
-    public List<Booking> getCustomerHistory(@PathVariable String customerId) {
-        return bookingService.getCustomerBookings(customerId);
+    @PreAuthorize("hasAnyRole('CUSTOMER','ADMIN')")
+    public List<BookingResponse> getCustomerHistory(@PathVariable String customerId) {
+        return bookingService.getCustomerBookings(customerId, CurrentUser.require());
     }
 
-    // 3. Cancel a booking (NEW FEATURE)
-    // Usage: POST /bookings/cancel/65f2a...
     @PostMapping("/cancel/{bookingId}")
-    public Booking cancelBooking(@PathVariable String bookingId) {
-        return bookingService.cancelBooking(bookingId);
+    @PreAuthorize("hasAnyRole('CUSTOMER','ADMIN')")
+    public BookingResponse cancelBooking(@PathVariable String bookingId) {
+        return bookingService.cancelBooking(bookingId, CurrentUser.require());
     }
 
-    // --- Admin Endpoints ---
-
-    // 4. View all pending bookings (waiting for staff assignment)
     @GetMapping("/pending")
-    public List<Booking> getPendingBookings() {
-        return bookingService.getAllPendingBookings();
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<BookingResponse> getPendingBookings() {
+        return bookingService.getPendingBookings();
     }
 
-    // 5. Assign staff to a booking
     @PostMapping("/assign")
-    public Booking assignStaff(@RequestParam String bookingId,
-                               @RequestParam String staffId,
-                               @RequestParam Double price) {
-        return bookingService.assignStaff(bookingId, staffId, price);
+    @PreAuthorize("hasRole('ADMIN')")
+    public BookingResponse assignStaff(@Valid @RequestBody AssignBookingRequest request) {
+        return bookingService.assignStaff(request);
     }
 
-    // --- Staff Endpoints ---
-
-    // 6. Staff: View their own assigned jobs
     @GetMapping("/staff/{staffId}")
-    public List<Booking> getStaffJobs(@PathVariable String staffId) {
-        return bookingService.getStaffBookings(staffId);
+    @PreAuthorize("hasAnyRole('WORKER','ADMIN')")
+    public List<BookingResponse> getStaffJobs(@PathVariable String staffId) {
+        return bookingService.getStaffBookings(staffId, CurrentUser.require());
     }
 
-    // 7. Mark job as completed
     @PostMapping("/complete/{bookingId}")
-    public Booking completeJob(@PathVariable String bookingId) {
-        return bookingService.completeBooking(bookingId);
+    @PreAuthorize("hasRole('WORKER')")
+    public BookingResponse completeJob(@PathVariable String bookingId) {
+        return bookingService.completeBooking(bookingId, CurrentUser.require());
     }
 }

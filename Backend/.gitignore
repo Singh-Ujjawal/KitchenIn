@@ -31,3 +31,14 @@ build/
 
 ### VS Code ###
 .vscode/
+
+uploads/
+application-local.properties
+
+
+# Secrets and local data
+.env
+.env.*
+!env.example
+application-local.properties
+dummy-*.json

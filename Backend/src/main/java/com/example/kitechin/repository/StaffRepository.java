@@ -1,15 +1,23 @@
 package com.example.kitechin.repository;
 
-import com.example.kitechin.entity.*;
+import com.example.kitechin.entity.Staff;
+import com.example.kitechin.entity.StaffCategory;
 import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.repository.MongoRepository;
-import java.util.*;
+
+import java.util.List;
+import java.util.Optional;
 
 public interface StaffRepository extends MongoRepository<Staff, ObjectId> {
-    Optional<Staff> findByEmail(String email);
+    Optional<Staff> findByEmailIgnoreCase(String email);
+
     List<Staff> findByApproved(boolean approved);
-//    List<Staff> findByCategory(StaffCategory category);
+
+    long countByApproved(boolean approved);
+
     List<Staff> findByCategoryAndApproved(StaffCategory category, boolean approved);
 
-   List<Staff> findByCityAndCategoryAndApproved(String city, StaffCategory category, boolean approved);
+    List<Staff> findByCityIgnoreCaseAndCategoryAndApproved(String city, StaffCategory category, boolean approved);
+
+    List<Staff> findTop6ByApprovedTrueOrderByRatingDesc();
 }

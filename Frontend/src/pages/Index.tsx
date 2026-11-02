@@ -1,104 +1,100 @@
-import { Link } from "react-router-dom";
-import { Star, Shield, Clock, Award } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Shield, Clock, BadgeCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/SearchBar";
 import { StaffCard } from "@/components/StaffCard";
-import { Header } from "@/components/Header";
-import { mockStaff } from "@/data/mockData";
+import { api } from "@/api";
+import { CATEGORIES } from "@/constants";
+import type { StaffPublic } from "@/types";
 
 const Index = () => {
-  const topRatedStaff = mockStaff.filter(s => s.rating >= 4.7).slice(0, 3);
+  const [params] = useSearchParams();
+  const [staff, setStaff] = useState<StaffPublic[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const response = await api.get<StaffPublic[]>("/staff/top");
+        setStaff(response.data);
+      } catch {
+        setError("Approved professionals could not be loaded right now.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header />
-
-      {/* Hero Section */}
-      <section className="relative bg-gradient-to-br from-primary/10 via-background to-accent/10 py-20">
-        <div className="container mx-auto px-4">
-          <div className="max-w-3xl mx-auto text-center mb-12">
-            <h1 className="text-5xl md:text-6xl font-bold text-foreground mb-6">
-              Hire Trusted <span className="text-primary">Home Service</span> Professionals
+    <main>
+      <section className="hero-glow border-b border-border">
+        <div className="container mx-auto px-4 py-20 md:py-28">
+          <div className="fade-up mx-auto mb-12 max-w-3xl text-center">
+            <p className="mb-5 inline-block rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-medium uppercase tracking-widest text-primary">Home services, locally assigned</p>
+            <h1 className="text-4xl font-semibold leading-tight tracking-tight text-foreground md:text-6xl">
+              Book a trusted professional for your home
             </h1>
-            <p className="text-xl text-muted-foreground mb-8">
-              Find verified Maids, Mechanics, and Workers in your city. Quality service at your doorstep.
+            <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
+              Search approved maids, mechanics, and workers in your city. An admin confirms the booking, the price, and the person who visits.
             </p>
           </div>
-
-          <SearchBar />
+          <SearchBar initialCategory={params.get("category") || ""} />
         </div>
       </section>
 
-      {/* Features Section */}
-      <section className="py-16 bg-secondary/30">
-        <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-4 gap-8">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Shield className="h-8 w-8 text-primary" />
-              </div>
-              <h3 className="font-semibold text-foreground mb-2">Verified Professionals</h3>
-              <p className="text-sm text-muted-foreground">All service providers are background verified</p>
-            </div>
-
-            <div className="text-center">
-              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Star className="h-8 w-8 text-primary" />
-              </div>
-              <h3 className="font-semibold text-foreground mb-2">Top Rated</h3>
-              <p className="text-sm text-muted-foreground">Choose from highly rated professionals</p>
-            </div>
-
-            <div className="text-center">
-              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Clock className="h-8 w-8 text-primary" />
-              </div>
-              <h3 className="font-semibold text-foreground mb-2">Quick Booking</h3>
-              <p className="text-sm text-muted-foreground">Book services in just a few clicks</p>
-            </div>
-
-            <div className="text-center">
-              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Award className="h-8 w-8 text-primary" />
-              </div>
-              <h3 className="font-semibold text-foreground mb-2">Quality Assured</h3>
-              <p className="text-sm text-muted-foreground">100% satisfaction guaranteed</p>
-            </div>
+      <section className="container mx-auto grid gap-6 px-4 py-14 md:grid-cols-3">
+        {[
+          { icon: Shield, title: "Approved before they work", text: "Workers can sign in only after an administrator reviews their account." },
+          { icon: Clock, title: "A clear booking time", text: "Choose a date and a morning, afternoon, or evening visit." },
+          { icon: BadgeCheck, title: "One review per finished job", text: "Ratings come from completed bookings, not from sample profiles." },
+        ].map((item) => (
+          <div key={item.title} className="lift rounded-2xl border border-border bg-card p-7">
+            <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10"><item.icon className="h-5 w-5 text-primary" /></span>
+            <h2 className="font-semibold">{item.title}</h2>
+            <p className="mt-2 text-sm text-muted-foreground">{item.text}</p>
           </div>
+        ))}
+      </section>
+
+      <section className="container mx-auto px-4 pb-14">
+        <h2 className="text-3xl font-semibold">Services</h2>
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
+          {CATEGORIES.map((category) => (
+            <Link
+              key={category.value}
+              to={`/?category=${category.value}#search`}
+              className="lift group rounded-2xl border border-border bg-card p-6"
+            >
+              <h3 className="text-lg font-semibold group-hover:text-primary">{category.label}</h3>
+              <p className="mt-2 text-sm text-muted-foreground">{category.description}</p>
+            </Link>
+          ))}
         </div>
       </section>
 
-      {/* Top Rated Professionals */}
-      <section className="py-16">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-12">
-            <h2 className="text-4xl font-bold text-foreground mb-4">
-              Top Rated Professionals
-            </h2>
-            <p className="text-muted-foreground">Meet our highly rated service providers</p>
+      <section className="container mx-auto px-4 pb-16">
+        <div className="mb-6 flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-3xl font-semibold">Approved professionals</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Shown from the live directory, ordered by rating.</p>
           </div>
-
-          <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {topRatedStaff.map((staff) => (
-              <StaffCard key={staff.id} staff={staff} />
-            ))}
-          </div>
-
-          <div className="text-center mt-12">
-            <Button asChild size="lg" className="bg-accent text-accent-foreground hover:bg-accent/90">
-              <Link to="/auth">Get Started</Link>
-            </Button>
-          </div>
+          <Button asChild variant="outline" className="rounded-full"><Link to="/auth">Create an account</Link></Button>
+        </div>
+        {loading && <p className="text-sm text-muted-foreground">Loading professionals...</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        {!loading && !error && staff.length === 0 && (
+          <p className="rounded-2xl border border-dashed bg-card/50 border-border px-6 py-10 text-center text-sm text-muted-foreground">
+            No approved professionals yet. New workers appear here after an admin approves them.
+          </p>
+        )}
+        <div className="grid gap-4 md:grid-cols-3">
+          {staff.map((person) => <StaffCard key={person.id} staff={person} />)}
         </div>
       </section>
-
-      {/* Footer */}
-      <footer className="bg-card border-t border-border py-8">
-        <div className="container mx-auto px-4 text-center text-muted-foreground">
-          <p>&copy; 2025 KitchenSolution. All rights reserved.</p>
-        </div>
-      </footer>
-    </div>
+    </main>
   );
 };
 

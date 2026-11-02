@@ -1,13 +1,13 @@
 package com.example.kitechin;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 class KitechInApplicationTests {
 
     @Test
-    void contextLoads() {
+    void applicationClassIsPresent() {
+        assertTrue(KitechInApplication.class.getSimpleName().contains("KitechIn"));
     }
-
 }

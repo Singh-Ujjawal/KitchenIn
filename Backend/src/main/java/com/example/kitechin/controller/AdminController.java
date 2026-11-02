@@ -1,28 +1,38 @@
 package com.example.kitechin.controller;
 
-import com.example.kitechin.entity.Admin;
+import com.example.kitechin.dto.AdminRegisterRequest;
+import com.example.kitechin.dto.AuthResponse;
+import com.example.kitechin.dto.LoginRequest;
+import com.example.kitechin.dto.UserResponse;
 import com.example.kitechin.service.AdminService;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
-
-import java.util.Optional;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/admin")
-@RequiredArgsConstructor
-@Tag(name="Admin APIs")
+@Tag(name = "Admin APIs")
 public class AdminController {
 
     private final AdminService adminService;
 
+    public AdminController(AdminService adminService) {
+        this.adminService = adminService;
+    }
+
     @PostMapping("/register")
-    public Admin register(@RequestBody Admin admin) {
-        return adminService.register(admin);
+    @ResponseStatus(HttpStatus.CREATED)
+    public UserResponse register(@Valid @RequestBody AdminRegisterRequest request) {
+        return adminService.register(request);
     }
 
     @PostMapping("/login")
-    public Optional<Admin> login(@RequestParam String email, @RequestParam String password) {
-        return adminService.login(email, password);
+    public AuthResponse login(@Valid @RequestBody LoginRequest request) {
+        return adminService.login(request);
     }
 }

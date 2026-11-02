@@ -1,64 +1,82 @@
 package com.example.kitechin.service;
 
 import com.example.kitechin.dto.DashboardStats;
-import com.example.kitechin.entity.Booking;
-import com.example.kitechin.entity.BookingStatus;
 import com.example.kitechin.repository.BookingRepository;
 import com.example.kitechin.repository.CustomerRepository;
 import com.example.kitechin.repository.StaffRepository;
-import lombok.RequiredArgsConstructor;
+import org.bson.Document;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-
 @Service
-@RequiredArgsConstructor
 public class DashboardService {
 
     private final CustomerRepository customerRepository;
     private final StaffRepository staffRepository;
     private final BookingRepository bookingRepository;
+    private final MongoTemplate mongoTemplate;
+
+    public DashboardService(CustomerRepository customerRepository,
+                            StaffRepository staffRepository,
+                            BookingRepository bookingRepository,
+                            MongoTemplate mongoTemplate) {
+        this.customerRepository = customerRepository;
+        this.staffRepository = staffRepository;
+        this.bookingRepository = bookingRepository;
+        this.mongoTemplate = mongoTemplate;
+    }
 
     public DashboardStats getStats() {
-        // 1. Calculate User Counts
         long totalCustomers = customerRepository.count();
-        long totalStaff = staffRepository.count();
-        long pendingApprovals = staffRepository.findByApproved(false).size();
-        long activeStaff = totalStaff - pendingApprovals;
+        long activeStaff = staffRepository.countByApproved(true);
+        long pendingApprovals = staffRepository.countByApproved(false);
 
-        // 2. Calculate Booking Counts
-        List<Booking> allBookings = bookingRepository.findAll();
-        long totalBookings = allBookings.size();
+        long pendingBookings = 0;
+        long assignedBookings = 0;
+        long completedBookings = 0;
+        long cancelledBookings = 0;
+        double revenue = 0;
 
-        long pendingBookings = allBookings.stream()
-                .filter(b -> b.getStatus() == BookingStatus.PENDING)
-                .count();
-
-        long completedBookings = allBookings.stream()
-                .filter(b -> b.getStatus() == BookingStatus.COMPLETED)
-                .count();
-
-        long cancelledBookings = allBookings.stream()
-                .filter(b -> b.getStatus() == BookingStatus.CANCELLED)
-                .count();
-
-        // 3. Calculate Revenue (Sum of price for COMPLETED jobs only)
-        // We treat null prices as 0.0 to avoid crashes
-        double revenue = allBookings.stream()
-                .filter(b -> b.getStatus() == BookingStatus.COMPLETED && b.getPrice() != null)
-                .mapToDouble(Booking::getPrice)
-                .sum();
+        Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.group("status")
+                        .count().as("count")
+                        .sum("price").as("priceSum")
+        );
+        AggregationResults<Document> results = mongoTemplate.aggregate(aggregation, "bookings", Document.class);
+        for (Document document : results.getMappedResults()) {
+            String status = document.getString("_id");
+            Number countValue = document.get("count", Number.class);
+            long count = countValue == null ? 0 : countValue.longValue();
+            if (status == null) {
+                continue;
+            }
+            switch (status) {
+                case "PENDING" -> pendingBookings = count;
+                case "ASSIGNED", "CONFIRMED" -> assignedBookings += count;
+                case "COMPLETED" -> {
+                    completedBookings = count;
+                    Number priceSum = document.get("priceSum", Number.class);
+                    revenue = priceSum == null ? 0 : priceSum.doubleValue();
+                }
+                case "CANCELLED" -> cancelledBookings = count;
+                default -> {
+                }
+            }
+        }
 
         return DashboardStats.builder()
                 .totalCustomers(totalCustomers)
-                .totalStaff(totalStaff)
+                .totalStaff(activeStaff + pendingApprovals)
                 .activeStaff(activeStaff)
                 .pendingApprovals(pendingApprovals)
-                .totalBookings(totalBookings)
+                .totalBookings(bookingRepository.count())
                 .pendingBookings(pendingBookings)
+                .assignedBookings(assignedBookings)
                 .completedBookings(completedBookings)
                 .cancelledBookings(cancelledBookings)
-                .totalRevenue(revenue)
+                .totalRevenue(Math.round(revenue * 100.0) / 100.0)
                 .build();
     }
 }

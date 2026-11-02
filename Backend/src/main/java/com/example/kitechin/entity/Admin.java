@@ -1,5 +1,6 @@
 package com.example.kitechin.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.*;
 import org.bson.types.ObjectId;
 import org.springframework.data.annotation.Id;
@@ -25,5 +26,7 @@ public class Admin {
     private String email;
 
     @NotBlank(message = "Password is required")
+    @JsonIgnore
+    @ToString.Exclude
     private String password;
 }

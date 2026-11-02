@@ -1,5 +1,6 @@
 package com.example.kitechin.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.*;
 import org.bson.types.ObjectId;
 import org.springframework.data.annotation.Id;
@@ -34,6 +35,8 @@ public class Staff {
 
     @NotBlank(message = "Password is required")
     @Size(min = 6, message = "Password must be at least 6 characters long")
+    @JsonIgnore
+    @ToString.Exclude
     private String password;
 
     @NotBlank(message = "Phone number is required")
@@ -47,9 +50,13 @@ public class Staff {
     @NotNull(message = "Category is required")
     private StaffCategory category;
 
+    @Builder.Default
     private boolean approved = false;
 
+    @Builder.Default
     private Double rating = 0.0;
+
+    @Builder.Default
     private Integer reviewCount = 0;
 
     private String profilePicture;

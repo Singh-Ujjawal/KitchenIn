@@ -1,103 +1,64 @@
-import { Link, useNavigate } from "react-router-dom";
-import { LogOut, Home, Wrench, Sparkles, ChefHat } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Home, LogOut } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { CATEGORIES } from "@/constants";
+import { clearSession, dashboardPath, getUser } from "@/lib/session";
 
-interface HeaderProps {
-  userRole?: string;
-  userName?: string;
-}
-
-
-export const Header = ({ userRole: propRole, userName: propName }: HeaderProps) => {
-  const [user, setUser] = useState<any>(null);
-  const [role, setRole] = useState<string | null>(null);
+export const Header = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [name, setName] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    const storedRole = localStorage.getItem("role");
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch (error) {
-        console.error("Error parsing user data", error);
-        localStorage.removeItem("user");
-      }
-    }
-    if (storedRole) {
-      setRole(storedRole);
-    }
-  }, []);
+    const user = getUser();
+    setName(user?.name || null);
+    setRole(user?.role || null);
+  }, [location.pathname]);
 
-  const handleLogout = () => {
-    localStorage.removeItem("user");
-    localStorage.removeItem("role");
-    setUser(null);
+  const logout = () => {
+    clearSession();
+    setName(null);
     setRole(null);
     navigate("/");
   };
 
-  const services = [
-    { name: "Plumber", icon: Wrench, path: "/services/plumber" },
-    { name: "Maid", icon: Sparkles, path: "/services/maid" },
-    { name: "Cook", icon: ChefHat, path: "/services/cook" },
-  ];
-
-  const displayUser = user;
-
   return (
-    <header className="bg-card border-b border-border sticky top-0 z-50 shadow-sm">
-      <div className="container mx-auto px-4 py-4">
-        <div className="flex justify-between items-center">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-              <Home className="h-6 w-6 text-primary-foreground" />
-            </div>
-            <span className="text-2xl font-bold text-primary">KitchenSolution</span>
-          </Link>
-          <nav className="flex items-center gap-8">
-            {!displayUser && (
-              <div className="flex items-center gap-4">
-                {services.map((service) => {
-                  const Icon = service.icon;
-                  return (
-                    <Button
-                      key={service.path}
-                      asChild
-                      variant="ghost"
-                      className="flex items-center gap-2 hover:bg-accent/10"
-                    >
-                      <Link to={service.path}>
-                        <Icon className="h-4 w-4" />
-                        <span className="hidden sm:inline">{service.name}</span>
-                      </Link>
-                    </Button>
-                  );
-                })}
-              </div>
-            )}
-            {displayUser ? (
-              <div className="flex items-center gap-4">
-                <span className="text-sm text-muted-foreground">
-                  Welcome, <span className="font-semibold text-foreground">{displayUser.name}</span>
-                </span>
-                <Button
-                  onClick={handleLogout}
-                  variant="outline"
-                  size="sm"
-                >
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Logout
-                </Button>
-              </div>
-            ) : (
-              <Button asChild className="bg-accent text-accent-foreground hover:bg-accent/90">
-                <Link to="/auth">Sign In</Link>
+    <header className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur-md">
+      <div className="container mx-auto flex items-center justify-between gap-4 px-4 py-3.5">
+        <Link to="/" className="flex items-center gap-2">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-md">
+            <Home className="h-5 w-5" />
+          </span>
+          <span className="font-display text-xl font-semibold tracking-tight text-foreground">Home Service Hub</span>
+        </Link>
+
+        <nav className="flex items-center gap-2">
+          <div className="hidden items-center gap-1 md:flex">
+            {CATEGORIES.map((category) => (
+              <Button key={category.value} asChild variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-foreground">
+                <Link to={`/?category=${category.value}#search`}>{category.label}</Link>
               </Button>
-            )}
-          </nav>
-        </div>
+            ))}
+          </div>
+          {name ? (
+            <>
+              <Button asChild variant="outline" size="sm" className="rounded-full">
+                <Link to={dashboardPath(role || undefined)}>Dashboard</Link>
+              </Button>
+              <span className="hidden text-sm text-muted-foreground sm:inline">{name}</span>
+              <Button type="button" variant="ghost" size="sm" onClick={logout}>
+                <LogOut className="mr-2 h-4 w-4" />
+                Logout
+              </Button>
+            </>
+          ) : (
+            <Button asChild size="sm" className="rounded-full px-5 shadow-md">
+              <Link to="/auth">Sign in</Link>
+            </Button>
+          )}
+        </nav>
       </div>
     </header>
   );

@@ -1,276 +1,300 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Header } from "@/components/Header";
-import { Users, UserCheck, IndianRupee, CheckCircle, XCircle } from "lucide-react";
-import { api } from "../api";
-import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { api } from "@/api";
+import { CITIES, categoryLabel, cityFromText } from "@/constants";
+import { errorMessage } from "@/lib/errors";
+import { formatDate, formatMoney } from "@/lib/format";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { EmptyState } from "@/components/EmptyState";
+import { Pager } from "@/components/Pager";
+import type { Booking, DashboardStats, StaffPublic, UserProfile } from "@/types";
+
+const PAGE_SIZE = 5;
+const emptyStats: DashboardStats = {
+  totalCustomers: 0,
+  totalStaff: 0,
+  activeStaff: 0,
+  pendingApprovals: 0,
+  totalBookings: 0,
+  pendingBookings: 0,
+  assignedBookings: 0,
+  completedBookings: 0,
+  cancelledBookings: 0,
+  totalRevenue: 0,
+};
 
 const AdminDashboard = () => {
-  const navigate = useNavigate();
-  const [stats, setStats] = useState({
-    totalCustomers: 0,
-    activeStaff: 0,
-    totalRevenue: 0,
-    pendingApprovals: 0
-  });
-  const [pendingStaff, setPendingStaff] = useState<any[]>([]);
-  const [pendingBookings, setPendingBookings] = useState<any[]>([]);
-  
-  // Assignment Modal State
-  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
-  const [selectedBooking, setSelectedBooking] = useState<any>(null);
-  const [availableStaff, setAvailableStaff] = useState<any[]>([]);
+  const [stats, setStats] = useState<DashboardStats>(emptyStats);
+  const [pendingStaff, setPendingStaff] = useState<UserProfile[]>([]);
+  const [pendingBookings, setPendingBookings] = useState<Booking[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [staffPage, setStaffPage] = useState(1);
+  const [bookingPage, setBookingPage] = useState(1);
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [availableStaff, setAvailableStaff] = useState<StaffPublic[]>([]);
   const [selectedStaffId, setSelectedStaffId] = useState("");
+  const [assignCity, setAssignCity] = useState("");
   const [price, setPrice] = useState("");
 
+  const load = async () => {
+    const [statsRes, staffRes, bookingRes] = await Promise.all([
+      api.get<DashboardStats>("/admin/dashboard/stats"),
+      api.get<UserProfile[]>("/staff/pending"),
+      api.get<Booking[]>("/bookings/pending"),
+    ]);
+    setStats(statsRes.data);
+    setPendingStaff(staffRes.data);
+    setPendingBookings(bookingRes.data);
+  };
+
   useEffect(() => {
-    fetchDashboardData();
+    load()
+      .catch((error) => toast.error(errorMessage(error, "Could not load the dashboard")))
+      .finally(() => setLoading(false));
   }, []);
 
-  const fetchDashboardData = async () => {
-    try {
-      const statsRes = await api.get("/admin/dashboard/stats");
-      setStats(statsRes.data);
+  const staffPages = Math.max(1, Math.ceil(pendingStaff.length / PAGE_SIZE));
+  const bookingPages = Math.max(1, Math.ceil(pendingBookings.length / PAGE_SIZE));
+  const visibleStaff = useMemo(
+    () => pendingStaff.slice((staffPage - 1) * PAGE_SIZE, staffPage * PAGE_SIZE),
+    [pendingStaff, staffPage]
+  );
+  const visibleBookings = useMemo(
+    () => pendingBookings.slice((bookingPage - 1) * PAGE_SIZE, bookingPage * PAGE_SIZE),
+    [pendingBookings, bookingPage]
+  );
 
-      const staffRes = await api.get("/staff/pending");
-      setPendingStaff(staffRes.data);
-
-      const bookingRes = await api.get("/bookings/pending");
-      setPendingBookings(bookingRes.data);
-
-    } catch (error) {
-      console.error("Error fetching dashboard data", error);
-    }
-  };
-
-  // --- STAFF ACTIONS ---
-
-  const handleApproveStaff = async (id: string) => {
+  const approve = async (id: string) => {
+    setSubmitting(true);
     try {
       await api.post(`/staff/approve/${id}`);
-      toast.success("Staff Approved Successfully");
-      fetchDashboardData(); // Refresh list
+      toast.success("Staff approved");
+      await load();
     } catch (error) {
-      toast.error("Failed to approve staff");
+      toast.error(errorMessage(error, "Could not approve staff"));
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  // NEW: Reject Logic using POST (Fixes the error)
-  const handleRejectStaff = async (id: string) => {
-    if(!confirm("Are you sure you want to reject this staff application?")) return;
-    
+  const reject = async () => {
+    if (!rejectId) return;
+    setSubmitting(true);
     try {
-        // FIX: Use .post() instead of .delete()
-        await api.post(`/staff/remove/${id}`);
-        
-        toast.success("Staff Application Rejected");
-        fetchDashboardData(); // Refresh list
+      await api.delete(`/staff/remove/${rejectId}`);
+      toast.success("Staff application removed");
+      setRejectId(null);
+      await load();
     } catch (error) {
-        console.error("Reject failed:", error);
-        toast.error("Failed to reject staff");
+      toast.error(errorMessage(error, "Could not reject staff"));
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  // --- ASSIGNMENT LOGIC ---
-  const openAssignModal = async (booking: any) => {
+  const openIdentity = async (filename?: string) => {
+    if (!filename) {
+      toast.error("No identity document uploaded");
+      return;
+    }
+    try {
+      const response = await api.get(`/staff/docs/identity/${filename}`, { responseType: "blob" });
+      const url = URL.createObjectURL(response.data);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      toast.error(errorMessage(error, "Could not open the document"));
+    }
+  };
+
+  const openAssign = async (booking: Booking) => {
+    const city = booking.city || cityFromText(booking.serviceAddress);
     setSelectedBooking(booking);
+    setAssignCity(city);
+    setSelectedStaffId("");
+    setPrice("");
+    setAvailableStaff([]);
+    if (city) await fetchStaff(city, booking.category);
+  };
+
+  const fetchStaff = async (city: string, category: string) => {
     try {
-        const res = await api.get(`/staff/category/${booking.serviceCategory || booking.category}`);
-        setAvailableStaff(res.data);
-        setIsAssignModalOpen(true);
+      const response = await api.get<StaffPublic[]>(`/staff/search/${encodeURIComponent(city)}/${category}`);
+      setAvailableStaff(response.data);
     } catch (error) {
-        toast.error("Could not fetch available staff");
+      toast.error(errorMessage(error, "Could not load matching staff"));
     }
   };
 
-  const handleAssignStaff = async () => {
-    if (!selectedStaffId || !price) {
-        toast.error("Please select staff and enter price");
-        return;
+  const assign = async () => {
+    const amount = Number(price);
+    if (!selectedBooking || !selectedStaffId || !Number.isFinite(amount) || amount <= 0) {
+      toast.error("Choose a staff member and enter a price greater than 0");
+      return;
     }
+    setSubmitting(true);
     try {
-        await api.post(`/bookings/assign?bookingId=${selectedBooking.id}&staffId=${selectedStaffId}&price=${price}`);
-        toast.success("Staff Assigned Successfully!");
-        setIsAssignModalOpen(false);
-        fetchDashboardData();
+      await api.post("/bookings/assign", {
+        bookingId: selectedBooking.id,
+        staffId: selectedStaffId,
+        price: amount,
+      });
+      toast.success("Staff assigned");
+      setSelectedBooking(null);
+      await load();
     } catch (error) {
-        toast.error("Assignment Failed");
+      toast.error(errorMessage(error, "Assignment failed"));
+    } finally {
+      setSubmitting(false);
     }
   };
+
+  const cards = [
+    ["Customers", stats.totalCustomers],
+    ["Staff", stats.totalStaff],
+    ["Approved staff", stats.activeStaff],
+    ["Pending staff", stats.pendingApprovals],
+    ["Bookings", stats.totalBookings],
+    ["Pending", stats.pendingBookings],
+    ["Assigned", stats.assignedBookings],
+    ["Completed", stats.completedBookings],
+    ["Cancelled", stats.cancelledBookings],
+    ["Revenue", formatMoney(stats.totalRevenue)],
+  ] as const;
 
   return (
-    <div className="min-h-screen bg-background pb-10">
-      <Header userRole="admin" userName="Admin" />
+    <main className="container mx-auto space-y-8 px-4 py-8">
+      <div>
+        <h1 className="text-3xl font-semibold">Admin</h1>
+        <p className="mt-1 text-muted-foreground">Approve staff, then assign them only when city and category match.</p>
+      </div>
 
-      <main className="container mx-auto px-4 py-8 space-y-8">
-        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+      {loading ? (
+        <p className="text-sm text-muted-foreground">Loading dashboard...</p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {cards.map(([label, value]) => (
+            <Card key={label}>
+              <CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">{label}</p>
+                <p className="mt-1 text-2xl font-semibold">{value}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
-        {/* --- STATS CARDS --- */}
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardContent className="p-6 flex justify-between items-center">
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold">Staff approval</h2>
+        {pendingStaff.length === 0 ? (
+          <EmptyState title="No applications waiting" description="New staff registrations appear here until you approve or reject them." />
+        ) : visibleStaff.map((staff) => (
+          <Card key={staff.id}>
+            <CardContent className="flex flex-col justify-between gap-4 p-5 md:flex-row md:items-center">
               <div>
-                <p className="text-sm text-muted-foreground">Total Customers</p>
-                <h2 className="text-3xl font-bold">{stats.totalCustomers}</h2>
+                <h3 className="font-semibold">{staff.name}</h3>
+                <p className="text-sm text-muted-foreground">
+                  {categoryLabel(staff.category)} · {staff.city} · {staff.phone} · {staff.email}
+                </p>
               </div>
-              <div className="p-3 bg-blue-100 rounded-full">
-                <Users className="text-blue-600" />
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => openIdentity(staff.identityProof)}>View ID</Button>
+                <Button variant="destructive" disabled={submitting} onClick={() => setRejectId(staff.id)}>Reject</Button>
+                <Button disabled={submitting} onClick={() => approve(staff.id)}>Approve</Button>
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-6 flex justify-between items-center">
-              <div>
-                <p className="text-sm text-muted-foreground">Active Staff</p>
-                <h2 className="text-3xl font-bold">{stats.activeStaff}</h2>
+        ))}
+        <Pager page={staffPage} pages={staffPages} onPage={setStaffPage} />
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold">Pending bookings</h2>
+        {pendingBookings.length === 0 ? (
+          <EmptyState title="No pending bookings" description="New customer requests show up here for assignment." />
+        ) : visibleBookings.map((booking) => (
+          <Card key={booking.id}>
+            <CardContent className="flex flex-col justify-between gap-4 p-5 md:flex-row md:items-start">
+              <div className="space-y-1 text-sm">
+                <h3 className="text-base font-semibold">{categoryLabel(booking.category)}</h3>
+                <p>{booking.customerName}{booking.customerPhone ? ` · ${booking.customerPhone}` : ""}</p>
+                <p className="text-muted-foreground">{formatDate(booking.bookingDate)} · {booking.timeSlot}</p>
+                <p className="text-muted-foreground">{booking.serviceAddress}{booking.city ? `, ${booking.city}` : ""}</p>
+                <p>{booking.problemDescription}</p>
               </div>
-              <div className="p-3 bg-green-100 rounded-full">
-                <UserCheck className="text-green-600" />
-              </div>
+              <Button onClick={() => openAssign(booking)}>Assign staff</Button>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-6 flex justify-between items-center">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Revenue</p>
-                <h2 className="text-3xl font-bold">₹{stats.totalRevenue}</h2>
-              </div>
-              <div className="p-3 bg-yellow-100 rounded-full">
-                <IndianRupee className="text-yellow-600" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        ))}
+        <Pager page={bookingPage} pages={bookingPages} onPage={setBookingPage} />
+      </section>
 
-        {/* --- PENDING STAFF APPROVALS --- */}
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Staff Approval Queue</h2>
-          {pendingStaff.length === 0 ? (
-            <div className="text-center p-8 border rounded-lg bg-gray-50 text-gray-500">
-                No staff waiting for approval.
-            </div>
-          ) : (
-            pendingStaff.map((staff) => (
-              <Card key={staff.id}>
-                <CardContent className="p-6 flex justify-between items-center">
-                  <div>
-                    <h3 className="font-bold text-lg">{staff.name}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Category: {staff.category} | City: {staff.city} | Phone: {staff.phone}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button 
-                        variant="destructive"
-                        onClick={() => handleRejectStaff(staff.id)}
-                    >
-                        <XCircle className="w-4 h-4 mr-2" /> Reject
-                    </Button>
-                    
-                    <Button 
-                        onClick={() => handleApproveStaff(staff.id)}
-                        className="bg-green-600 hover:bg-green-700"
-                    >
-                        <CheckCircle className="w-4 h-4 mr-2" /> Approve
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-
-        {/* --- PENDING BOOKINGS --- */}
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Pending Bookings</h2>
-          {pendingBookings.length === 0 ? (
-            <div className="text-center p-8 border rounded-lg bg-gray-50 text-gray-500">
-                No pending bookings.
-            </div>
-          ) : (
-            pendingBookings.map((booking) => (
-              <Card key={booking.id}>
-                <CardContent className="p-6 flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold">{booking.category || booking.serviceCategory} Service</h3>
-                    <p className="text-sm">Date: {booking.bookingDate} | Time: {booking.timeSlot}</p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Address: {booking.serviceAddress}
-                    </p>
-                    <p className="text-sm text-muted-foreground mt-1 italic">
-                      Issue: "{booking.problemDescription}"
-                    </p>
-                  </div>
-                  <Button onClick={() => openAssignModal(booking)}>
-                    Assign Staff
-                  </Button>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-      </main>
-
-      {/* --- ASSIGN STAFF MODAL --- */}
-      <Dialog open={isAssignModalOpen} onOpenChange={setIsAssignModalOpen}>
+      <Dialog open={Boolean(selectedBooking)} onOpenChange={(open) => !open && setSelectedBooking(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Assign Staff</DialogTitle>
+            <DialogTitle>Assign staff</DialogTitle>
             <DialogDescription>
-              Select a staff member for this {selectedBooking?.category} job.
+              Only approved {categoryLabel(selectedBooking?.category).toLowerCase()} professionals in the booking city can be selected.
             </DialogDescription>
           </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-                <Label>Select Staff</Label>
-                <Select onValueChange={setSelectedStaffId}>
-                    <SelectTrigger>
-                        <SelectValue placeholder="Choose a staff member" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {availableStaff.length === 0 ? (
-                            <SelectItem value="none" disabled>No staff found in this category</SelectItem>
-                        ) : (
-                            availableStaff.map(staff => (
-                                <SelectItem key={staff.id} value={staff.id}>
-                                    {staff.name} ({staff.rating || "New"}★) - {staff.city}
-                                </SelectItem>
-                            ))
-                        )}
-                    </SelectContent>
+          <div className="space-y-4">
+            {!selectedBooking?.city && (
+              <div className="space-y-2">
+                <Label>City</Label>
+                <Select value={assignCity || undefined} onValueChange={(value) => {
+                  setAssignCity(value);
+                  setSelectedStaffId("");
+                  if (selectedBooking) fetchStaff(value, selectedBooking.category);
+                }}>
+                  <SelectTrigger><SelectValue placeholder="Match a city" /></SelectTrigger>
+                  <SelectContent>{CITIES.map((city) => <SelectItem key={city} value={city}>{city}</SelectItem>)}</SelectContent>
                 </Select>
-            </div>
-
+              </div>
+            )}
             <div className="space-y-2">
-                <Label>Final Price (₹)</Label>
-                <Input 
-                    type="number" 
-                    placeholder="Enter amount" 
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                />
+              <Label>Staff</Label>
+              <Select value={selectedStaffId || undefined} onValueChange={setSelectedStaffId}>
+                <SelectTrigger><SelectValue placeholder="Choose a staff member" /></SelectTrigger>
+                <SelectContent>
+                  {availableStaff.length === 0 ? (
+                    <SelectItem value="none" disabled>No approved staff in this city and category</SelectItem>
+                  ) : availableStaff.map((staff) => (
+                    <SelectItem key={staff.id} value={staff.id}>
+                      {staff.name} · {staff.city} · {staff.rating || "New"}★
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-
-            <Button className="w-full" onClick={handleAssignStaff}>
-                Confirm Assignment
+            <div className="space-y-2">
+              <Label htmlFor="price">Price (₹)</Label>
+              <Input id="price" type="number" min="1" step="1" value={price} onChange={(event) => setPrice(event.target.value)} />
+            </div>
+            <Button className="w-full" disabled={submitting} onClick={assign}>
+              {submitting ? "Please wait..." : "Confirm assignment"}
             </Button>
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+
+      <ConfirmDialog
+        open={Boolean(rejectId)}
+        title="Reject this application?"
+        description="The staff account is deleted. This is blocked if the person already has bookings."
+        confirmLabel="Reject application"
+        destructive
+        loading={submitting}
+        onOpenChange={(open) => !open && setRejectId(null)}
+        onConfirm={reject}
+      />
+    </main>
   );
 };
 

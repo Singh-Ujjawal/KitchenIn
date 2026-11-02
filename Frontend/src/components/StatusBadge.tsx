@@ -1,29 +1,14 @@
 import { Badge } from "@/components/ui/badge";
-import { BookingStatus } from "@/data/mockData";
+import type { BookingStatus } from "@/types";
 
-interface StatusBadgeProps {
-  status: BookingStatus;
-}
-
-export const StatusBadge = ({ status }: StatusBadgeProps) => {
-  const getStatusColor = () => {
-    switch (status) {
-      case BookingStatus.PENDING:
-        return "bg-muted text-muted-foreground hover:bg-muted";
-      case BookingStatus.ASSIGNED:
-        return "bg-primary text-primary-foreground hover:bg-primary";
-      case BookingStatus.COMPLETED:
-        return "bg-success text-success-foreground hover:bg-success";
-      case BookingStatus.CANCELLED:
-        return "bg-destructive text-destructive-foreground hover:bg-destructive";
-      default:
-        return "bg-muted text-muted-foreground hover:bg-muted";
-    }
-  };
-
-  return (
-    <Badge className={getStatusColor()}>
-      {status}
-    </Badge>
-  );
+const styles: Record<string, string> = {
+  PENDING: "bg-amber-100 text-amber-900 hover:bg-amber-100",
+  ASSIGNED: "bg-sky-100 text-sky-900 hover:bg-sky-100",
+  COMPLETED: "bg-emerald-100 text-emerald-900 hover:bg-emerald-100",
+  CANCELLED: "bg-red-100 text-red-800 hover:bg-red-100",
+  CONFIRMED: "bg-sky-100 text-sky-900 hover:bg-sky-100",
 };
+
+export const StatusBadge = ({ status }: { status: BookingStatus | string }) => (
+  <Badge className={styles[status] || "bg-muted text-muted-foreground"}>{status}</Badge>
+);

@@ -1,155 +1,170 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Calendar, Clock, MapPin, Phone } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Header } from "@/components/Header";
-import { Calendar, Clock, MapPin, CheckCircle, User } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
-import { api } from "../api";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { api, profileImageUrl } from "@/api";
+import { categoryLabel } from "@/constants";
+import { errorMessage } from "@/lib/errors";
+import { formatDate, formatMoney } from "@/lib/format";
+import { getToken, getUser, updateStoredUser } from "@/lib/session";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { EmptyState } from "@/components/EmptyState";
+import { Pager } from "@/components/Pager";
+import { StatusBadge } from "@/components/StatusBadge";
+import type { Booking, UserProfile } from "@/types";
+
+const PAGE_SIZE = 5;
 
 const StaffDashboard = () => {
-  const navigate = useNavigate();
-  const [user, setUser] = useState<any>(null);
-  const [jobs, setJobs] = useState<any[]>([]);
+  const [user, setUser] = useState<UserProfile | null>(getUser());
+  const [jobs, setJobs] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [page, setPage] = useState(1);
+  const [completeId, setCompleteId] = useState<string | null>(null);
+  const [profileFile, setProfileFile] = useState<File | null>(null);
+  const [identityFile, setIdentityFile] = useState<File | null>(null);
+
+  const load = async (staffId: string) => {
+    const response = await api.get<Booking[]>(`/bookings/staff/${staffId}`);
+    setJobs(response.data);
+  };
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    if (!storedUser) {
-      navigate("/auth");
+    const current = getUser();
+    if (!current) {
+      setLoading(false);
       return;
     }
-    const parsedUser = JSON.parse(storedUser);
-    setUser(parsedUser);
+    api.get<Booking[]>(`/bookings/staff/${current.id}`)
+      .then((response) => setJobs(response.data))
+      .catch((error) => toast.error(errorMessage(error, "Could not load your jobs")))
+      .finally(() => setLoading(false));
+  }, []);
 
-    fetchMyJobs(parsedUser.id);
-  }, [navigate]);
+  const pages = Math.max(1, Math.ceil(jobs.length / PAGE_SIZE));
+  const visible = useMemo(() => jobs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [jobs, page]);
+  const photo = profileImageUrl(user?.profilePicture);
 
-  const fetchMyJobs = async (staffId: string) => {
+  const upload = async () => {
+    if (!user || (!profileFile && !identityFile)) {
+      toast.error("Choose a profile photo or an identity document");
+      return;
+    }
+    setSubmitting(true);
     try {
-      // CALL REAL BACKEND API
-      const response = await api.get(`/bookings/staff/${staffId}`);
-      setJobs(response.data);
+      const form = new FormData();
+      if (profileFile) form.append("profilePic", profileFile);
+      if (identityFile) form.append("identityProof", identityFile);
+      const response = await api.post<UserProfile>(`/staff/docs/upload/${user.id}`, form);
+      updateStoredUser(response.data);
+      setUser(response.data);
+      setProfileFile(null);
+      setIdentityFile(null);
+      toast.success("Documents saved");
     } catch (error) {
-      console.error("Failed to fetch jobs", error);
-      toast.error("Could not load your jobs");
+      toast.error(errorMessage(error, "Upload failed"));
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  const handleCompleteJob = async (bookingId: string) => {
+  const complete = async () => {
+    if (!completeId || !user) return;
+    setSubmitting(true);
     try {
-        await api.post(`/bookings/complete/${bookingId}`);
-        toast.success("Job Marked as Completed!");
-        // Refresh list
-        if (user) fetchMyJobs(user.id);
+      await api.post(`/bookings/complete/${completeId}`);
+      toast.success("Job marked completed");
+      setCompleteId(null);
+      await load(user.id);
     } catch (error) {
-        toast.error("Failed to update job status");
+      toast.error(errorMessage(error, "Could not complete the job"));
+    } finally {
+      setSubmitting(false);
     }
   };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "COMPLETED": return "bg-green-500";
-      case "ASSIGNED": return "bg-blue-500";
-      case "CANCELLED": return "bg-red-500";
-      default: return "bg-yellow-500";
-    }
-  };
-
-  if (loading) return <div className="p-10 text-center">Loading...</div>;
 
   return (
-    <div className="min-h-screen bg-background pb-10">
-      <Header userRole="staff" userName={user?.name} />
-
-      <main className="container mx-auto px-4 py-8 space-y-8">
-        
-        {/* --- PROFILE SECTION --- */}
-        <Card className="bg-primary/5 border-none">
-            <CardContent className="p-6 flex items-center gap-6">
-                <div className="h-24 w-24 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center border-4 border-white shadow-sm">
-                    {user?.profilePicture ? (
-                        <img src={`http://localhost:8080/staff/docs/image/${user.profilePicture}`} alt="Profile" className="h-full w-full object-cover" />
-                    ) : (
-                        <User className="h-12 w-12 text-gray-400" />
-                    )}
-                </div>
-                <div>
-                    <h1 className="text-2xl font-bold">{user?.name}</h1>
-                    <div className="flex items-center gap-2 mt-1 text-muted-foreground">
-                        <Badge variant="outline" className="bg-white">{user?.category}</Badge>
-                        <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {user?.city}</span>
-                    </div>
-                    <div className="mt-2 text-sm font-medium text-amber-600">
-                        ⭐ {user?.rating || "New"} Rating ({user?.reviewCount || 0} reviews)
-                    </div>
-                </div>
-            </CardContent>
-        </Card>
-
-        {/* --- MY JOBS LIST --- */}
-        <div>
-          <h2 className="text-2xl font-bold mb-4">My Assigned Jobs</h2>
-          
-          {jobs.length === 0 ? (
-            <div className="text-center p-10 border rounded-lg bg-gray-50 text-gray-500">
-              You have no assigned jobs yet.
-            </div>
+    <main className="container mx-auto space-y-8 px-4 py-8">
+      <Card>
+        <CardContent className="flex flex-col gap-6 p-6 md:flex-row md:items-center">
+          {photo ? (
+            <img src={photo} alt="" className="h-20 w-20 rounded-md object-cover" />
           ) : (
-            <div className="grid gap-4">
-              {jobs.map((job) => (
-                <Card key={job.id} className="border shadow-sm">
-                  <CardContent className="p-6">
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <h3 className="font-bold text-lg">Customer Booking #{job.id.substring(0,6)}</h3>
-                        <p className="text-sm text-muted-foreground mt-1">
-                            {job.serviceCategory} Service
-                        </p>
-                      </div>
-                      <Badge className={getStatusColor(job.status)}>
-                        {job.status}
-                      </Badge>
-                    </div>
-
-                    <div className="bg-gray-50 p-4 rounded-md mb-4 text-sm space-y-2">
-                        <div className="font-semibold">Job Details:</div>
-                        <p>{job.problemDescription}</p>
-                        <div className="flex items-center gap-2 text-muted-foreground pt-2">
-                            <MapPin className="w-4 h-4" /> {job.serviceAddress}
-                        </div>
-                    </div>
-
-                    <div className="flex justify-between items-center pt-2 border-t">
-                      <div className="flex gap-4 text-sm">
-                        <div className="flex items-center gap-1">
-                            <Calendar className="w-4 h-4" /> {job.bookingDate}
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <Clock className="w-4 h-4" /> {job.timeSlot}
-                        </div>
-                      </div>
-
-                      {job.status === "ASSIGNED" && (
-                          <Button 
-                            onClick={() => handleCompleteJob(job.id)}
-                            className="bg-green-600 hover:bg-green-700"
-                          >
-                            <CheckCircle className="w-4 h-4 mr-2" /> Mark Completed
-                          </Button>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+            <div className="flex h-20 w-20 items-center justify-center rounded-md bg-muted text-2xl font-semibold">
+              {user?.name?.slice(0, 1)}
             </div>
           )}
-        </div>
-      </main>
-    </div>
+          <div className="flex-1">
+            <h1 className="text-2xl font-semibold">{user?.name}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {categoryLabel(user?.category)} · {user?.city} · {user?.approved ? "Approved" : "Pending approval"}
+            </p>
+            <p className="mt-1 text-sm">Rating {user?.rating || "New"} · {user?.reviewCount || 0} reviews</p>
+            <p className="mt-1 text-sm text-muted-foreground">{user?.identityProof ? "Identity document uploaded" : "Identity document not uploaded yet"}</p>
+          </div>
+          <div className="grid w-full gap-3 md:w-80">
+            <div className="space-y-1">
+              <Label htmlFor="profile">Profile photo</Label>
+              <Input id="profile" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setProfileFile(event.target.files?.[0] || null)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="identity">Identity document</Label>
+              <Input id="identity" type="file" accept="image/jpeg,image/png,application/pdf" onChange={(event) => setIdentityFile(event.target.files?.[0] || null)} />
+            </div>
+            <Button disabled={submitting || !getToken()} onClick={upload}>{submitting ? "Please wait..." : "Upload documents"}</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold">Assigned jobs</h2>
+        {loading && <p className="text-sm text-muted-foreground">Loading jobs...</p>}
+        {!loading && jobs.length === 0 && (
+          <EmptyState title="No jobs assigned" description="When an admin assigns you a booking in your city and category, it will show up here." />
+        )}
+        {visible.map((job) => (
+          <Card key={job.id}>
+            <CardContent className="space-y-4 p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">{categoryLabel(job.category)}</h3>
+                  <p className="text-sm text-muted-foreground">{job.customerName || "Customer"}</p>
+                </div>
+                <StatusBadge status={job.status} />
+              </div>
+              <p className="text-sm">{job.problemDescription}</p>
+              <div className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
+                <p className="flex items-center gap-2"><Calendar className="h-4 w-4" /> {formatDate(job.bookingDate)}</p>
+                <p className="flex items-center gap-2"><Clock className="h-4 w-4" /> {job.timeSlot}</p>
+                <p className="flex items-center gap-2"><MapPin className="h-4 w-4" /> {job.serviceAddress}{job.city ? `, ${job.city}` : ""}</p>
+                {job.customerPhone && <p className="flex items-center gap-2"><Phone className="h-4 w-4" /> {job.customerPhone}</p>}
+              </div>
+              <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
+                <p className="text-sm font-medium">Agreed price: {formatMoney(job.price)}</p>
+                {job.status === "ASSIGNED" && (
+                  <Button size="sm" onClick={() => setCompleteId(job.id)}>Mark completed</Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+        <Pager page={page} pages={pages} onPage={setPage} />
+      </section>
+
+      <ConfirmDialog
+        open={Boolean(completeId)}
+        title="Mark this job completed?"
+        description="Only the assigned staff member can complete an assigned booking. This cannot be cancelled afterwards."
+        confirmLabel="Mark completed"
+        loading={submitting}
+        onOpenChange={(open) => !open && setCompleteId(null)}
+        onConfirm={complete}
+      />
+    </main>
   );
 };
 

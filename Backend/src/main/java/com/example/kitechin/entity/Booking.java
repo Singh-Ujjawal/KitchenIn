@@ -4,6 +4,7 @@ import lombok.*;
 import org.bson.types.ObjectId;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import jakarta.validation.constraints.*;
 import java.time.LocalDate;
@@ -26,16 +27,20 @@ public class Booking {
     private ObjectId id;
 
     // 3. ADD THIS TO CUSTOMER ID
+    @Indexed
     @JsonSerialize(using = ToStringSerializer.class)
     @NotNull(message = "Customer ID is required")
     private ObjectId customerId;
 
-    // 4. ADD THIS TO STAFF ID
+    @Indexed
     @JsonSerialize(using = ToStringSerializer.class)
     private ObjectId staffId;
 
     @NotNull(message = "Service category is required")
     private StaffCategory category;
+
+    @Indexed
+    private String city;
 
     @NotNull(message = "Booking date is required")
     private LocalDate bookingDate;
@@ -51,6 +56,7 @@ public class Booking {
 
     private Double price;
 
+    @Indexed
     @Builder.Default
     private BookingStatus status = BookingStatus.PENDING;
 
